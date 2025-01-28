@@ -4,35 +4,72 @@
 #include <thread>
 #include <sstream>
 #include <chrono>
+#include <cstring>
+#include <stdio.h>
+#include <netinet/in.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <sys/stat.h>
 
-void runApplication(std::string command, int delaySeconds = 0) {
-    std::this_thread::sleep_for(std::chrono::seconds(2));
-    if (delaySeconds > 0) {
-        std::this_thread::sleep_for(std::chrono::seconds(delaySeconds));
-    }
-
-    std::cout << "Executing command: " << command << std::endl;
-
-    int result = std::system(command.c_str());
-    if (result != 0) {
-        std::cerr << "Command failed with exit code: " << result << std::endl;
-    }
-}
+constexpr int BUFFER_SIZE = 4096;
+int PORT_BASE = 55990;
 
 void merge(int a, int b) {
 
-    std::stringstream command1_stream, command2_stream;
-    command1_stream << "./main " << a << " " << b << " 1";
-    command2_stream << "./main " << b << " " << a << " 0";
+    std::cout << "Merging " << a << " and " << b << std::endl; 
+    int sock = 0;
+    int opt = 1;
+    struct sockaddr_in serv_addr, client_addr;
 
-    std::string command1 = command1_stream.str();
-    std::string command2 = command2_stream.str();
+    char buffer[BUFFER_SIZE] = {0};
 
-    std::thread thread1(runApplication, command1, 0);
-    std::thread thread2(runApplication, command2, 1); 
+    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        perror("Socket creation error");
+        return;
+    }
 
-    thread1.join();
-    thread2.join();
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(PORT_BASE + a);
+
+    std::memset(&client_addr, 0, sizeof(client_addr));
+    client_addr.sin_family = AF_INET;
+    client_addr.sin_addr.s_addr = INADDR_ANY;
+    client_addr.sin_port = htons(56990 + 100);
+
+    if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
+        perror("Setsockopt failed");
+        close(sock);
+        return;
+    }
+
+    if (bind(sock, (struct sockaddr *)&client_addr, sizeof(client_addr)) < 0) {
+        perror("Client bind failed");
+        close(sock);
+        return;
+    }
+
+    if (inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr) <= 0) {
+        perror("Invalid address / Address not supported");
+        close(sock);
+        return;
+    }
+
+    if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+        perror("Manager connection Failed");
+        close(sock);
+        return;
+    }
+
+    char s[BUFFER_SIZE] = {0};
+    s[0] = 'z';
+    s[1] = a;
+    s[2] = b; 
+
+    send(sock, s, BUFFER_SIZE, 0);
+    close(sock);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+
 }
 
 void merge(int a, int b, int c, int d) {
